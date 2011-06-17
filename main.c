@@ -1,9 +1,15 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <dirent.h>
 #include <SDL.h>
 #include "i8080.h"
 #include "perifer.h"
 #include "tui.h"
+
+#ifndef TAPE_PATH
+#define TAPE_PATH "tape"
+#endif
 
 int vscr_width = 6 * 64;
 int vscr_height = 9 * 25;
@@ -15,6 +21,8 @@ uns8 memory_font[2048];
 static SDL_Surface *screen;
 
 static int fExit = 0;
+
+static int fMenu = 0;
 
 //
 static volatile uint64_t one_takt_delay = 0;
@@ -90,7 +98,7 @@ static void ChecKeyboard(void)
     SDL_Event event;
     int keystat = 2;
 
-    if(SDL_WaitEvent(&event) > 0){
+    if(SDL_PollEvent(&event) > 0){
 	switch(event.type) {
 	case SDL_QUIT:
 	    exitRequested();
@@ -99,7 +107,7 @@ static void ChecKeyboard(void)
 	    keystat--;
 	case SDL_KEYUP:
 	    keystat--;
-	    sdlkey=event.key.keysym.sym;
+	    sdlkey = event.key.keysym.sym;
 	    //fprintf(stderr, "KEY %02X %02X\n", sdlkey, keystat);
 	    switch(sdlkey) {
 	    case SDLK_LSHIFT: keyMod(SS, keystat); break;
@@ -187,8 +195,12 @@ static void ChecKeyboard(void)
 
 int SDLCALL HandleKeyboard(void *unused)
 {
-    while (!fExit)
-	ChecKeyboard();
+    while (!fExit) {
+	if (!fMenu)
+	    ChecKeyboard();
+	else
+	    sleep(1);
+    }
 
     return 0;
 }
@@ -234,6 +246,55 @@ int loadimage(char *name, uns8 *ptr, uns16 len)
     fclose(f);
 
     return ret;
+}
+
+FILE *open_tape(void)
+{
+    FILE *tape;
+    char *name = NULL;
+    DIR *dirp;
+    struct dirent *dp;
+    char dir[256];
+
+    tui_menu *menu = tui_menu_new(13,13);
+
+    if ((dirp = opendir(TAPE_PATH)) == NULL) {
+	fprintf(stderr, "couldn't open directory.\n");
+	return NULL;
+    }
+
+    while ((dp = readdir(dirp)) != NULL) {
+	if (dp->d_type & DT_REG)
+	    tui_menu_add_item(menu, dp->d_name);
+    }
+
+    closedir(dirp);
+
+//	tui_menu_dump(menu);
+    tui_menu_draw(menu, 3, 3);
+    fMenu = 1;
+    while (fMenu && !fExit) {
+	SDL_Event event;
+	if(SDL_WaitEvent(&event) > 0) {
+	    switch (event.type) {
+	    case SDL_QUIT:
+		exitRequested();
+		break;
+	    case SDL_KEYDOWN: 
+		switch(event.key.keysym.sym) {
+		case SDLK_UP: tui_menu_key(menu, TUI_UP); tui_menu_draw(menu, 3, 3); break;
+		case SDLK_DOWN: tui_menu_key(menu, TUI_DOWN); tui_menu_draw(menu, 3, 3); break;
+		case SDLK_RETURN: fMenu = 0; name = tui_menu_get_item(menu); break;
+		default: break;
+		}
+	    default: break;
+	    }
+	}
+    }
+    sprintf(dir, "%s/%s", TAPE_PATH, name);
+    tape = fopen(dir, "rb");
+    tui_menu_free(menu);
+    return tape;
 }
 
 int main(int argc, char *argv[])
@@ -300,6 +361,7 @@ int main(int argc, char *argv[])
     keybd_thread = SDL_CreateThread(HandleKeyboard, NULL);
 
     fExit = 0;
+    fMenu = 0;
 
     i8080_init();
     i8080_reset();
@@ -309,55 +371,31 @@ int main(int argc, char *argv[])
     READ_TIMESTAMP(ts1);
     while(!fExit) {
 
-if (PC == 0xfb98) {
-    fprintf(stderr, "input from tape [%02X] ->", A);
-    if (!tape) {
-	draw_box(5, 5, 64 - 10, 25 - 10, 'X');
-	draw_box(6, 6, 64 - 12, 25 - 12, ' ');
-	draw_string(8, 6, "HELLO WORLD!");
-	tui_menu *menu = tui_menu_new(13,13);
-	tui_menu_add_item(menu, "hell1");
-	tui_menu_add_item(menu, "hell2");
-	tui_menu_add_item(menu, "hell3");
-	tui_menu_add_item(menu, "hell4");
-	tui_menu_add_item(menu, "hell5");
-	tui_menu_add_item(menu, "hell6");
-	tui_menu_add_item(menu, "hell7");
-	tui_menu_add_item(menu, "hell8");
-	tui_menu_add_item(menu, "hell9");
-	tui_menu_add_item(menu, "hell10");
-	tui_menu_add_item(menu, "hell11");
-	tui_menu_add_item(menu, "hell12");
-	tui_menu_add_item(menu, "hell12");
-	tui_menu_add_item(menu, "hell14");
-	tui_menu_add_item(menu, "hell15");
-	tui_menu_add_item(menu, "hell16");
-	tui_menu_dump(menu);
-	tui_menu_draw(3, 3, menu);
-	tui_menu_free(menu);
-	sleep(5);
-	tape = fopen(argv[1], "rb");
-    }
-    if (tape) {
-	int c = EOF;
-	if (A == 0xff) {
-	    do {
-		c = fgetc(tape);
-	    } while (c != EOF && c != 0xe6);
-	    if (c == 0xe6)
-		c = fgetc(tape);
-	} else if (A == 0x08)
-	    c = fgetc(tape);
-	if (c == EOF) {
-	    fclose(tape);
-	    tape = NULL;
+    if (PC == 0xfb98) {
+	fprintf(stderr, "input from tape [%02X] ->", A);
+	if (!tape) {
+	    tape = open_tape();
 	}
-	A = c;
+	if (tape) {
+	    int c = EOF;
+	    if (A == 0xff) {
+		do {
+		    c = fgetc(tape);
+		} while (c != EOF && c != 0xe6);
+		if (c == 0xe6)
+		    c = fgetc(tape);
+	    } else if (A == 0x08)
+		c = fgetc(tape);
+	    if (c == EOF) {
+		fclose(tape);
+		tape = NULL;
+	    }
+	    A = c;
+	}
+	fprintf(stderr, " [%02X]!\n", A);
+	Tstates += 10;
+	POP(PC);
     }
-    fprintf(stderr, " [%02X]!\n", A);
-    Tstates += 10;
-    POP(PC);
-}
 
 	i8080_do_opcode();
 
