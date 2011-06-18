@@ -20,7 +20,7 @@ void draw_box(uns16 x, uns16 y, uns16 w, uns16 h, uns8 c)
 	    draw_char(x + i, y +j, c);
 }
 
-tui_menu *tui_menu_new(uns16 w, uns16 h)
+tui_menu *tui_menu_new(uns16 w, uns16 h, char *name)
 {
     tui_menu *tmp = malloc(sizeof(tui_menu));
     if (!tmp)
@@ -31,6 +31,7 @@ tui_menu *tui_menu_new(uns16 w, uns16 h)
     tmp->vis_start = 0;
     tmp->cur_pos = 0;
     tmp->num_items = 0;
+    tmp->text = strdup(name);
     tmp->item = NULL;
 
     return tmp;
@@ -68,6 +69,7 @@ void tui_menu_free(tui_menu *m)
 	free(item);
 	item = tmp;
     }
+    free(m->text);
     free(m);
 }
 
@@ -87,8 +89,9 @@ void tui_menu_draw(tui_menu *m, uns16 x, uns16 y)
     int h = m->h;
 
     menu_item *item = m->item;
-    draw_box(x, y, w, h, 'X');
+    draw_box(x, y, w, h, 0x17);
     draw_box(x + 1, y + 1, w - 2, h - 2, ' ');
+    draw_string(x + (w - strlen(m->text))/2, y, m->text);
     for (i = 0; i != m->vis_start && item; item = item->next, i++) ;
     if (item) {
 	for (i = 0, j = y + 1; j < y + h - 1 && item; item = item->next, j++, i++) {
