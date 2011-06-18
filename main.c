@@ -23,6 +23,7 @@ static SDL_Surface *screen;
 static int fExit = 0;
 
 static int fMenu = 0;
+static int tapeTimer = 0;
 
 //
 static volatile uint64_t one_takt_delay = 0;
@@ -210,6 +211,8 @@ int SDLCALL HandleVideo(void *unused)
     while (!fExit) {
 	SDL_Flip(screen);
 	usleep(20000);
+	if (tapeTimer > 0)
+	    tapeTimer--;
     }
 
     return 0;
@@ -256,7 +259,7 @@ FILE *open_tape(void)
     struct dirent *dp;
     char dir[256];
 
-    tui_menu *menu = tui_menu_new(13,13);
+    tui_menu *menu = tui_menu_new(33, 13, "wyberite fail:");
 
     if ((dirp = opendir(TAPE_PATH)) == NULL) {
 	fprintf(stderr, "couldn't open directory.\n");
@@ -285,6 +288,7 @@ FILE *open_tape(void)
 		case SDLK_UP: tui_menu_key(menu, TUI_UP); tui_menu_draw(menu, 3, 3); break;
 		case SDLK_DOWN: tui_menu_key(menu, TUI_DOWN); tui_menu_draw(menu, 3, 3); break;
 		case SDLK_RETURN: fMenu = 0; name = tui_menu_get_item(menu); break;
+		case SDLK_ESCAPE: fMenu = 0; tapeTimer = 500; break;
 		default: break;
 		}
 	    default: break;
@@ -362,6 +366,7 @@ int main(int argc, char *argv[])
 
     fExit = 0;
     fMenu = 0;
+    tapeTimer = 0;
 
     i8080_init();
     i8080_reset();
@@ -373,7 +378,7 @@ int main(int argc, char *argv[])
 
     if (PC == 0xfb98) {
 	fprintf(stderr, "input from tape [%02X] ->", A);
-	if (!tape) {
+	if (!tape && !tapeTimer) {
 	    tape = open_tape();
 	}
 	if (tape) {
